@@ -1,4 +1,5 @@
-"""A notebook manager that uses SHOCK storage.
+"""A notebook manager that uses Shock storage.
+https://github.com/MG-RAST/Shock
 
 Authors:
 
@@ -6,21 +7,28 @@ Authors:
 """
 
 #-----------------------------------------------------------------------------
+#  Copyright (C) 2012  The IPython Development Team
+#
+#  Distributed under the terms of the BSD License.  The full license is in
+#  the file COPYING, distributed as part of this software.
+#-----------------------------------------------------------------------------
+
+#-----------------------------------------------------------------------------
 # Imports
 #-----------------------------------------------------------------------------
 
 import cStringIO
 import datetime
-import requests, json
+import requests
+import json
 import dateutil.parser
-
 from collections import defaultdict
+
 from tornado import web
 
 from .nbmanager import NotebookManager
 from IPython.nbformat import current
 from IPython.utils.traitlets import Unicode, Instance
-
 
 #-----------------------------------------------------------------------------
 # Classes
@@ -28,13 +36,13 @@ from IPython.utils.traitlets import Unicode, Instance
 
 class ShockNotebookManager(NotebookManager):
 
-    shock_url  = Unicode('', config=True, help='SHOCK server url')
-    shock_user = Unicode('', config=True, help='SHOCK user name')
+    shock_url  = Unicode('', config=True, help='Shock server url')
+    shock_user = Unicode('', config=True, help='Shock user name')
     shock_map  = {}
 
     def set_notebook_names(self):
-        """load the notebook ids and names from SHOCK.
-        The uuid and name are stored as shock metadata.
+        """load the notebook ids and names from Shock.
+        The uuid and name are stored as Shock metadata.
             1. Skip nb nodes with no files
             2. Skip nb nodes tagged as 'deleted'
             3. If multiple nb with same uuid, get latest timestamp
@@ -45,7 +53,7 @@ class ShockNotebookManager(NotebookManager):
         nb_user = self.shock_user if self.shock_user else 'public'
 
         query_url = self.shock_url+'/node?query&type=ipynb&user='+nb_user
-        query_res = self.getShock(query_url, 'json')
+        query_res = self._get_shock(query_url, 'json')
         
         if query_res is not None:
             for node in query_res:
@@ -91,7 +99,7 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(404, u'Notebook does not exist: %s' %notebook_id)
         try:
             node_url  = '%s/node/%s?download' %(self.shock_url, self.shock_map[notebook_id]['id'])
-            node_data = self.getShock(node_url, 'data')
+            node_data = self._get_shock(node_url, 'data')
         except:
             raise web.HTTPError(500, u'Notebook cannot be read')
         try:
@@ -125,7 +133,7 @@ class ShockNotebookManager(NotebookManager):
             #data = current.writes(nb, u'json')
             data = json.dumps(nb)
             attr = json.dumps(nb.metadata)
-            shock_node = self.postShock(self.shock_url+'/node', new_name, data, attr)
+            shock_node = self._post_shock(self.shock_url+'/node', new_name, data, attr)
         except Exception as e:
             raise web.HTTPError(400, u'Unexpected error while saving notebook: %s' %e)
 
@@ -144,38 +152,38 @@ class ShockNotebookManager(NotebookManager):
         self.write_notebook_object(nb, notebook_id)
         self.delete_notebook_id(notebook_id)
 
-    def getShock(self, url, format):
+    def _get_shock(self, url, format):
         content = None
         try:
             rget = requests.get(url)
         except Exception as e:
-            raise web.HTTPError(400, u'Unable to connect to SHOCK server %s: %s' %(url, e))
+            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rget.ok and rget.text):
-            raise web.HTTPError(400, u'Unable to connect to SHOCK server %s: %s' %(url, rget.raise_for_status()))
+            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, rget.raise_for_status()))
         if format == 'json':
             rj = rget.json
             if not (rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
-                raise web.HTTPError(415, u'Return data not valid SHOCK format: %s' %e)
+                raise web.HTTPError(415, u'Return data not valid Shock format: %s' %e)
             if rj['E']:
-                raise web.HTTPError(rj['S'], 'SHOCK error: '+rj['E'])
+                raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
             return rj['D']
         else:
             return rget.text
 
-    def postShock(self, url, name, data, attr):
-        dataHdl = cStringIO.StringIO(data)
-        attrHdl = cStringIO.StringIO(attr)
-        files = { "upload": ('%s.ipynb'%name, dataHdl), "attributes": ('%s_metadata.json'%name, attrHdl) }
+    def _post_shock(self, url, name, data, attr):
+        data_hdl = cStringIO.StringIO(data)
+        attr_hdl = cStringIO.StringIO(attr)
+        files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
             rpost = requests.post(url, files=files)
             rj = rpost.json
         except Exception as e:
-            raise web.HTTPError(400, u'Unable to connect to SHOCK server %s: %s' %(url, e))
+            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rpost.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
-            raise web.HTTPError(400, u'Unable to POST to SHOCK server %s: %s' %(url, rpost.raise_for_status()))
+            raise web.HTTPError(400, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
         if rj['E']:
-            raise web.HTTPError(rj['S'], 'SHOCK error: '+rj['E'])
+            raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
         return rj['D']
 
     def log_info(self):
-        self.log.info("Serving notebooks from SHOCK storage for user %s: %s" %(self.shock_user, self.shock_url))
+        self.log.info("Serving notebooks from Shock storage for user %s: %s" %(self.shock_user, self.shock_url))
