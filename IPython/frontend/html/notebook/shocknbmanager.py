@@ -36,9 +36,11 @@ from IPython.utils.traitlets import Unicode, Instance
 
 class ShockNotebookManager(NotebookManager):
 
-    shock_url  = Unicode('', config=True, help='Shock server url')
-    shock_user = Unicode('', config=True, help='Shock user name')
-    shock_map  = {}
+    shock_url = Unicode('', config=True, help='Shock server url')
+    shock_name = Unicode('', config=True, help='Shock user login name')
+    shock_passwd = Unicode('', config=True, help='Shock user login password')
+    shock_token = Unicode('', config=True, help='Shock user bearer token')
+    shock_map = {}
 
     def set_notebook_names(self):
         """load the notebook ids and names from Shock.
@@ -50,16 +52,15 @@ class ShockNotebookManager(NotebookManager):
         self.mapping = {}
         self.shock_map = {}
         nb_vers = defaultdict(list)
-        nb_user = self.shock_user if self.shock_user else 'public'
-
-        query_url = self.shock_url+'/node?query&type=ipynb&user='+nb_user
+        
+        query_url = self.shock_url+'/node?querynode&type=ipynb'
         query_res = self._get_shock(query_url, 'json')
         
         if query_res is not None:
             for node in query_res:
-                if not (node['file']['size'] and node['attributes']['uuid'] and node['attributes']['name']):
+                if not (node['file']['size'] and node['attributes']['nbid'] and node['attributes']['name']):
                     continue
-                nb_vers[ node['attributes']['uuid'] ].append(node)
+                nb_vers[ node['attributes']['nbid'] ].append(node)
 
         # only get listing of latest for each notebook uuid set
         for uuid in nb_vers.iterkeys():
@@ -143,8 +144,8 @@ class ShockNotebookManager(NotebookManager):
 
     def delete_notebook(self, notebook_id):
         """Delete notebook by notebook_id.
-        Currently can not delete or change data in shock,
-        instead we create a new copy, flagged as deleted"""
+        Currently can not delete in shock,
+        instead we create a new copy flagged as deleted"""
         if not self.notebook_exists(notebook_id):
             raise web.HTTPError(404, u'Notebook does not exist: %s' %notebook_id)
         last_modified, nb = self.read_notebook_object(notebook_id)
@@ -155,7 +156,12 @@ class ShockNotebookManager(NotebookManager):
     def _get_shock(self, url, format):
         content = None
         try:
-            rget = requests.get(url)
+            keyArgs = {}
+            if self.shock_token:
+                keyArgs['headers'] = {'Authorization': 'OAuth %s'%self.shock_token}
+            elif self.shock_name and self.shock_passwd:
+                keyArgs['auth'] = (self.shock_name, self.shock_passwd)
+            rget = requests.get(url, **keyArgs)
         except Exception as e:
             raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rget.ok and rget.text):
@@ -175,7 +181,12 @@ class ShockNotebookManager(NotebookManager):
         attr_hdl = cStringIO.StringIO(attr)
         files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
-            rpost = requests.post(url, files=files)
+            keyArgs = {'files': files}
+            if self.shock_token:
+                keyArgs['headers'] = {'Authorization': 'OAuth %s'%self.shock_token}
+            elif self.shock_name and self.shock_passwd:
+                keyArgs['auth'] = (self.shock_name, self.shock_passwd)
+            rpost = requests.post(url, **keyArgs)
             rj = rpost.json
         except Exception as e:
             raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
