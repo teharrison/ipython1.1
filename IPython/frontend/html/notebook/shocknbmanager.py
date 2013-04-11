@@ -182,7 +182,7 @@ class ShockNotebookManager(NotebookManager):
         attr_hdl = cStringIO.StringIO(attr)
         files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
-            keyArgs = {'files': files}
+            keyArgs = {'files': files, 'data': {'datatype': 'ipynb'}}
             if self.shock_token:
                 keyArgs['headers'] = {'Authorization': 'OAuth %s'%self.shock_token}
             elif self.shock_name and self.shock_passwd:
