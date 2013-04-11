@@ -121,17 +121,18 @@ class ShockNotebookManager(NotebookManager):
         try:
             if notebook_id is None:
                 notebook_id = self.new_notebook_id(new_name)
+            if not hasattr(nb.metadata, 'type'):
+                nb.metadata.type = 'generic'
+            if not hasattr(nb.metadata, 'description'):
+                nb.metadata.description = ''
             nb.metadata.created = datetime.datetime.utcnow().isoformat()
-            nb.metadata.user = self.shock_user if self.shock_user else 'public'
-            nb.metadata.type = 'ipynb'
-            nb.metadata.uuid = notebook_id
+            nb.metadata.nbid = notebook_id
         except Exception as e:
             raise web.HTTPError(400, u'Unexpected error setting notebook attributes: %s' %e)
         if notebook_id not in self.mapping:
             raise web.HTTPError(404, u'Notebook does not exist: %s' %notebook_id)
 
         try:
-            #data = current.writes(nb, u'json')
             data = json.dumps(nb)
             attr = json.dumps(nb.metadata)
             shock_node = self._post_shock(self.shock_url+'/node', new_name, data, attr)
@@ -197,4 +198,4 @@ class ShockNotebookManager(NotebookManager):
         return rj['D']
 
     def log_info(self):
-        self.log.info("Serving notebooks from Shock storage for user %s: %s" %(self.shock_user, self.shock_url))
+        self.log.info("Serving notebooks from Shock storage %s" %self.shock_url)
