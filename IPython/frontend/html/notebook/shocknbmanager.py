@@ -36,11 +36,35 @@ from IPython.utils.traitlets import Unicode, Instance
 
 class ShockNotebookManager(NotebookManager):
 
-    shock_url = Unicode('', config=True, help='Shock server url')
-    shock_name = Unicode('', config=True, help='Shock user login name')
-    shock_passwd = Unicode('', config=True, help='Shock user login password')
-    shock_token = Unicode('', config=True, help='Shock user bearer token')
-    shock_map = {}
+    shock_url   = Unicode('', config=True, help='Shock server url')
+    shock_auth  = Unicode('', config=True, help="Shock authentication mode. Must be 'basic' or 'globus'")
+    user_name   = Unicode('', config=True, help='Shock user login name. For basic auth')
+    user_passwd = Unicode('', config=True, help='Shock user login password. For basic auth')
+    user_token  = Unicode('', config=True, help='Globus user bearer token. For globus auth. Used multi user authentication')
+    ipynb_token = Unicode('', config=True, help='Globus ipython admin bearer token. For globus auth. Used for single or multi user authentication.')
+    user_email  = None
+    node_type   = 'ipynb'
+    shock_map   = {}
+    get_auth    = {}
+    post_auth   = {}
+
+    def __init__(self, **kwargs):
+        """verify Shock Auth mode and proper auth credintals for that mode, set auth GET/POST format"""
+        super(ShockNotebookManager, self).__init__(**kwargs)
+        if not (self.shock_auth == 'basic' or self.shock_auth == 'globus'):
+            raise web.HTTPError(412, u"Invalid Shock Authentication mode (%s). Choose 'basic' or 'globus'." %self.shock_auth)
+        if self.user_name and self.user_passwd and self.shock_auth == 'basic':
+            self.get_auth = {'auth': (self.user_name, self.user_passwd)}
+            self.post_auth = {'auth': (self.user_name, self.user_passwd)}
+        elif self.user_token and self.ipynb_token and self.shock_auth == 'globus':
+            self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
+            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
+            self.user_email = self._get_goauth(self.user_token, 'email')
+        elif self.ipynb_token and self.shock_auth == 'globus':
+            self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
+            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
+        else:
+            raise web.HTTPError(412, u"Missing credintals for Shock Authentication mode (%s)."%self.shock_auth)
 
     def set_notebook_names(self):
         """load the notebook ids and names from Shock.
@@ -53,11 +77,11 @@ class ShockNotebookManager(NotebookManager):
         self.shock_map = {}
         nb_vers = defaultdict(list)
         
-        query_url = self.shock_url+'/node?querynode&type=ipynb'
-        query_res = self._get_shock(query_url, 'json')
+        query_path = '?querynode&type='+self.node_type
+        query_result = self._get_shock_node(query_path, 'json')
         
-        if query_res is not None:
-            for node in query_res:
+        if query_result is not None:
+            for node in query_result:
                 if not (node['file']['size'] and node['attributes']['nbid'] and node['attributes']['name']):
                     continue
                 nb_vers[ node['attributes']['nbid'] ].append(node)
@@ -99,8 +123,8 @@ class ShockNotebookManager(NotebookManager):
         if not self.notebook_exists(notebook_id):
             raise web.HTTPError(404, u'Notebook does not exist: %s' %notebook_id)
         try:
-            node_url  = '%s/node/%s?download' %(self.shock_url, self.shock_map[notebook_id]['id'])
-            node_data = self._get_shock(node_url, 'data')
+            node_path = '/%s?download' %self.shock_map[notebook_id]['id']
+            node_data = self._get_shock_node(node_path, 'data')
         except:
             raise web.HTTPError(500, u'Notebook cannot be read')
         try:
@@ -135,7 +159,7 @@ class ShockNotebookManager(NotebookManager):
         try:
             data = json.dumps(nb)
             attr = json.dumps(nb.metadata)
-            shock_node = self._post_shock(self.shock_url+'/node', new_name, data, attr)
+            shock_node = self._post_shock_node(new_name, data, attr)
         except Exception as e:
             raise web.HTTPError(400, u'Unexpected error while saving notebook: %s' %e)
 
@@ -154,19 +178,29 @@ class ShockNotebookManager(NotebookManager):
         self.write_notebook_object(nb, notebook_id)
         self.delete_notebook_id(notebook_id)
 
-    def _get_shock(self, url, format):
+    def _get_goauth(self, token, key=None):
+        name = token.split('|')[0].split('=')[1]
+        gurl = "https://nexus.api.globusonline.org/users/"+name
+        try:
+            rget = requests.get(url, headers={'Authorization': 'Globus-Goauthtoken %s'%token})
+        except Exception as e:
+            raise web.HTTPError(504, u'Unable to connect to Globus server %s: %s' %(url, e))
+        if not (rget.ok and rget.text):
+            raise web.HTTPError(504, u'Unable to connect to Globus server %s: %s' %(url, rget.raise_for_status()))
+        rj = rget.json
+        if not (rj and isinstance(rj, dict)):
+            raise web.HTTPError(415, u'Return data not valid JSON format: %s' %e)
+        return rj[key] if key and key in rj else rj
+
+    def _get_shock_node(self, path, format):
+        url = self.shock_url+'/node'+path
         content = None
         try:
-            keyArgs = {}
-            if self.shock_token:
-                keyArgs['headers'] = {'Authorization': 'OAuth %s'%self.shock_token}
-            elif self.shock_name and self.shock_passwd:
-                keyArgs['auth'] = (self.shock_name, self.shock_passwd)
-            rget = requests.get(url, **keyArgs)
+            rget = requests.get(url, **self.get_auth)
         except Exception as e:
-            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
+            raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rget.ok and rget.text):
-            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, rget.raise_for_status()))
+            raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, rget.raise_for_status()))
         if format == 'json':
             rj = rget.json
             if not (rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
@@ -177,25 +211,44 @@ class ShockNotebookManager(NotebookManager):
         else:
             return rget.text
 
-    def _post_shock(self, url, name, data, attr):
+    def _post_shock_node(self, name, data, attr):
+        url = self.shock_url+'/node'
         data_hdl = cStringIO.StringIO(data)
         attr_hdl = cStringIO.StringIO(attr)
         files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
-            keyArgs = {'files': files, 'data': {'datatype': 'ipynb'}}
-            if self.shock_token:
-                keyArgs['headers'] = {'Authorization': 'OAuth %s'%self.shock_token}
-            elif self.shock_name and self.shock_passwd:
-                keyArgs['auth'] = (self.shock_name, self.shock_passwd)
-            rpost = requests.post(url, **keyArgs)
+            kwargs = {'files': files, 'data': {'datatype': self.node_type}}
+            kwargs.update(self.post_auth)
+            rpost = requests.post(url, **kwargs)
             rj = rpost.json
         except Exception as e:
-            raise web.HTTPError(400, u'Unable to connect to Shock server %s: %s' %(url, e))
+            raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rpost.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
-            raise web.HTTPError(400, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
+            raise web.HTTPError(500, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
         if rj['E']:
             raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
+        # running in globus multi-user auth mode
+        # we need to add the user to node read/write ACLs
+        if self.user_token and self.user_email and self.shock_auth == 'globus':
+            self._put_shock_acl(rj['D']['id'], ['read', 'write'], self.user_email)
         return rj['D']
+
+    def _put_shock_acl(self, node, modes, email):
+        url = '%s/node/%s/acl' %(self.shock_url, node)
+        try:
+            kwargs = {'params': {}}
+            for m in modes:
+                kwargs['params'][m] = email
+            kwargs.update(self.post_auth)
+            rput = requests.put(url, **kwargs)
+            rj = rput.json
+        except Exception as e:
+            raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
+        if not (rput.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
+            raise web.HTTPError(500, u'Unable to PUT to Shock server %s: %s' %(url, rput.raise_for_status()))
+        if rj['E']:
+            raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
+        return
 
     def log_info(self):
         self.log.info("Serving notebooks from Shock storage %s" %self.shock_url)
