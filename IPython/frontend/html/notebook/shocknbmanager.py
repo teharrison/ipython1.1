@@ -82,9 +82,8 @@ class ShockNotebookManager(NotebookManager):
         
         if query_result is not None:
             for node in query_result:
-                if not (node['file']['size'] and node['attributes']['nbid'] and node['attributes']['name']):
-                    continue
-                nb_vers[ node['attributes']['nbid'] ].append(node)
+                if node['file']['size'] and ('nbid' in node['attributes']) and node['attributes']['nbid'] and ('name' in node['attributes']) and node['attributes']['name']:
+                    nb_vers[ node['attributes']['nbid'] ].append(node)
 
         # only get listing of latest for each notebook uuid set
         for uuid in nb_vers.iterkeys():
