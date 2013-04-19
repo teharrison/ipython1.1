@@ -41,8 +41,9 @@ class ShockNotebookManager(NotebookManager):
     user_name   = Unicode('', config=True, help='Shock user login name. For basic auth')
     user_passwd = Unicode('', config=True, help='Shock user login password. For basic auth')
     user_token  = Unicode('', config=True, help='Globus user bearer token. For globus auth. Used multi user authentication')
-    ipynb_token = Unicode('', config=True, help='Globus ipython admin bearer token. For globus auth. Used for single or multi user authentication.')
+    ipynb_token = Unicode('', config=True, help='Globus ipython bearer token. For globus auth. Used for single or multi user authentication.')
     user_email  = None
+    ipynb_email = None
     node_type   = 'ipynb'
     shock_map   = {}
     get_auth    = {}
@@ -63,6 +64,7 @@ class ShockNotebookManager(NotebookManager):
         elif self.ipynb_token and self.shock_auth == 'globus':
             self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
             self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
+            self.ipynb_email = self._get_goauth(self.ipynb_token, 'email')
         else:
             raise web.HTTPError(412, u"Missing credintals for Shock Authentication mode (%s)."%self.shock_auth)
 
@@ -228,19 +230,27 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
         # running in globus multi-user auth mode
         # we need to add the user to node read/write ACLs
+        # in single user mode, make read ACL public
         if self.user_token and self.user_email and self.shock_auth == 'globus':
-            self._put_shock_acl(rj['D']['id'], ['read', 'write'], self.user_email)
+            self._edit_shock_acl(rj['D']['id'], 'put', ['read', 'write'], self.user_email)
+        elif self.ipynb_token and self.ipynb_email and self.shock_auth == 'globus':
+            self._edit_shock_acl(rj['D']['id'], 'delete', ['read'], self.ipynb_email)
         return rj['D']
 
-    def _put_shock_acl(self, node, modes, email):
+    def _edit_shock_acl(self, action, node, modes, email):
         url = '%s/node/%s/acl' %(self.shock_url, node)
+        kwargs = {'params': {}}
+        for m in modes:
+            kwargs['params'][m] = email
+        kwargs.update(self.post_auth)
         try:
-            kwargs = {'params': {}}
-            for m in modes:
-                kwargs['params'][m] = email
-            kwargs.update(self.post_auth)
-            rput = requests.put(url, **kwargs)
-            rj = rput.json
+            if action == 'put':
+                result = requests.put(url, **kwargs)
+            elif action == 'delete':
+                result = requests.delete(url, **kwargs)
+            else:
+                raise web.HTTPError(500, u'Invalid Shock ACL action: %s' %action)
+            rj = result.json
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rput.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
