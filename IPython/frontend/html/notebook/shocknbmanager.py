@@ -37,13 +37,11 @@ from IPython.utils.traitlets import Unicode, Instance
 class ShockNotebookManager(NotebookManager):
 
     shock_url   = Unicode('', config=True, help='Shock server url')
-    shock_auth  = Unicode('', config=True, help="Shock authentication mode. Must be 'basic' or 'globus'")
-    user_name   = Unicode('', config=True, help='Shock user login name. For basic auth')
-    user_passwd = Unicode('', config=True, help='Shock user login password. For basic auth')
-    user_token  = Unicode('', config=True, help='Globus user bearer token. For globus auth. Used multi user authentication')
-    ipynb_token = Unicode('', config=True, help='Globus ipython bearer token. For globus auth. Used for single or multi user authentication.')
+    shock_auth  = Unicode('', config=True, help="Shock authentication mode, must be 'basic' or 'globus'")
+    user_name   = Unicode('', config=True, help='Shock user login name, for basic auth')
+    user_passwd = Unicode('', config=True, help='Shock user login password, for basic auth.')
+    user_token  = Unicode('', config=True, help='Globus user bearer token, for globus auth (OAuth 2.0).')
     user_email  = None
-    ipynb_email = None
     node_type   = 'ipynb'
     shock_map   = {}
     get_auth    = {}
@@ -57,14 +55,10 @@ class ShockNotebookManager(NotebookManager):
         if self.user_name and self.user_passwd and self.shock_auth == 'basic':
             self.get_auth = {'auth': (self.user_name, self.user_passwd)}
             self.post_auth = {'auth': (self.user_name, self.user_passwd)}
-        elif self.user_token and self.ipynb_token and self.shock_auth == 'globus':
+        elif self.user_token and self.shock_auth == 'globus':
             self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
-            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
-            self.user_email = self._get_goauth(self.user_token, 'email')
-        elif self.ipynb_token and self.shock_auth == 'globus':
-            self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
-            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.ipynb_token}}
-            self.ipynb_email = self._get_goauth(self.ipynb_token, 'email')
+            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
+            self.user_token = self._get_goauth(self.user_token, 'email')
         else:
             raise web.HTTPError(412, u"Missing credintals for Shock Authentication mode (%s)."%self.shock_auth)
 
@@ -146,6 +140,10 @@ class ShockNotebookManager(NotebookManager):
         try:
             if notebook_id is None:
                 notebook_id = self.new_notebook_id(new_name)
+            if not hasattr(nb.metadata, 'owner'):
+                nb.metadata.owner = 'public'
+            if not hasattr(nb.metadata, 'access'):
+                nb.metadata.access = []
             if not hasattr(nb.metadata, 'type'):
                 nb.metadata.type = 'generic'
             if not hasattr(nb.metadata, 'description'):
@@ -228,20 +226,21 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(500, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
         if rj['E']:
             raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
-        # running in globus multi-user auth mode
-        # we need to add the user to node read/write ACLs
-        # in single user mode, make read ACL public
+        # running in globus auth mode
         if self.user_token and self.user_email and self.shock_auth == 'globus':
-            self._edit_shock_acl(rj['D']['id'], 'put', ['read', 'write'], self.user_email)
-        elif self.ipynb_token and self.ipynb_email and self.shock_auth == 'globus':
-            self._edit_shock_acl(rj['D']['id'], 'delete', ['read'], self.ipynb_email)
+            # remove read ACLs for public notebook
+            if ('owner' in attr) and (attr['owner'] == 'public'):
+                self._edit_shock_acl(rj['D']['id'], 'delete', 'read', [self.user_email])
+            # add shared users to node read ACLs
+            elif ('owner' in attr) and ('access' in attr) and (len(attr['access']) > 0):    
+                self._edit_shock_acl(rj['D']['id'], 'put', 'read', attr['access'])
+            else:
+                raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %e)
         return rj['D']
 
-    def _edit_shock_acl(self, action, node, modes, email):
+    def _edit_shock_acl(self, action, node, mode, emails):
         url = '%s/node/%s/acl' %(self.shock_url, node)
-        kwargs = {'params': {}}
-        for m in modes:
-            kwargs['params'][m] = email
+        kwargs = {'params': { mode: ','.join(emails) }}
         kwargs.update(self.post_auth)
         try:
             if action == 'put':
