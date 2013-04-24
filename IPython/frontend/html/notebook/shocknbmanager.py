@@ -253,8 +253,8 @@ class ShockNotebookManager(NotebookManager):
             rj = result.json
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
-        if not (rput.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
-            raise web.HTTPError(500, u'Unable to PUT to Shock server %s: %s' %(url, rput.raise_for_status()))
+        if not (result.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
+            raise web.HTTPError(500, u'Unable to PUT to Shock server %s: %s' %(url, result.raise_for_status()))
         if rj['E']:
             raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
         return
