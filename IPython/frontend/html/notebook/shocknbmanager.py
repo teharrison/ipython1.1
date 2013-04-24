@@ -232,7 +232,7 @@ class ShockNotebookManager(NotebookManager):
             if ('owner' in attr) and (attr['owner'] == 'public'):
                 self._edit_shock_acl(rj['D']['id'], 'delete', 'read', [self.user_email])
             # add shared users to node read ACLs
-            elif ('owner' in attr) and ('access' in attr) and attr['access']):
+            elif ('owner' in attr) and ('access' in attr) and attr['access']:
                 self._edit_shock_acl(rj['D']['id'], 'put', 'read', attr['access'])
             else:
                 raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %e)
