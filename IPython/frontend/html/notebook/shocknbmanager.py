@@ -58,7 +58,7 @@ class ShockNotebookManager(NotebookManager):
         elif self.user_token and self.shock_auth == 'globus':
             self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
             self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
-            self.user_token = self._get_goauth(self.user_token, 'email')
+            self.user_email = self._get_goauth(self.user_token, 'email')
         else:
             raise web.HTTPError(412, u"Missing credintals for Shock Authentication mode (%s)."%self.shock_auth)
 
