@@ -179,7 +179,7 @@ class ShockNotebookManager(NotebookManager):
 
     def _get_goauth(self, token, key=None):
         name = token.split('|')[0].split('=')[1]
-        gurl = "https://nexus.api.globusonline.org/users/"+name
+        url  = "https://nexus.api.globusonline.org/users/"+name
         try:
             rget = requests.get(url, headers={'Authorization': 'Globus-Goauthtoken %s'%token})
         except Exception as e:
@@ -228,6 +228,7 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
         # running in globus auth mode
         if self.user_token and self.user_email and self.shock_auth == 'globus':
+            attr = rj['D']['attributes']
             # remove read ACLs for public notebook
             if ('owner' in attr) and (attr['owner'] == 'public'):
                 self._edit_shock_acl(rj['D']['id'], 'delete', 'read', [self.user_email])
@@ -238,7 +239,7 @@ class ShockNotebookManager(NotebookManager):
                 raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %e)
         return rj['D']
 
-    def _edit_shock_acl(self, action, node, mode, emails):
+    def _edit_shock_acl(self, node, action, mode, emails):
         url = '%s/node/%s/acl' %(self.shock_url, node)
         kwargs = {'params': { mode: ','.join(emails) }}
         kwargs.update(self.post_auth)
