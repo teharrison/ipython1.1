@@ -182,7 +182,7 @@ class ShockNotebookManager(NotebookManager):
 
     def _get_oauth(self, token, key=None):
         name = token.split('|')[0].split('=')[1]
-        url  = oauth_url+"/"+name
+        url  = self.oauth_url+"/"+name
         try:
             rget = requests.get(url, headers={'Authorization': 'Globus-Goauthtoken %s'%token})
         except Exception as e:
