@@ -76,7 +76,7 @@ class ShockNotebookManager(NotebookManager):
         self.shock_map = {}
         nb_vers = defaultdict(list)
         
-        query_path = '?querynode&type='+self.node_type
+        query_path = '?querynode&type='+self.node_type+'&limit=0'
         query_result = self._get_shock_node(query_path, 'json')
         
         if query_result is not None:
@@ -205,11 +205,11 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, rget.raise_for_status()))
         if format == 'json':
             rj = rget.json
-            if not (rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
+            if not (rj and isinstance(rj, dict) and all([key in rj for key in ['status','data','error']])):
                 raise web.HTTPError(415, u'Return data not valid Shock format: %s' %e)
-            if rj['E']:
-                raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
-            return rj['D']
+            if rj['error']:
+                raise web.HTTPError(rj['status'], 'Shock error: '+rj['error'])
+            return rj['data']
         else:
             return rget.text
 
@@ -225,22 +225,22 @@ class ShockNotebookManager(NotebookManager):
             rj = rpost.json
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
-        if not (rpost.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
+        if not (rpost.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['status','data','error']])):
             raise web.HTTPError(500, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
-        if rj['E']:
-            raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
+        if rj['error']:
+            raise web.HTTPError(rj['status'], 'Shock error: '+rj['error'])
         # running in OAuth mode
         if self.user_token and self.user_email and self.shock_auth == 'oauth':
-            attr = rj['D']['attributes']
+            attr = rj['data']['attributes']
             # remove read ACLs for public notebook
             if ('owner' in attr) and (attr['owner'] == 'public'):
-                self._edit_shock_acl(rj['D']['id'], 'delete', 'read', [self.user_email])
+                self._edit_shock_acl(rj['data']['id'], 'delete', 'read', [self.user_email])
             # add shared users to node read ACLs
             elif ('owner' in attr) and ('access' in attr) and attr['access']:
-                self._edit_shock_acl(rj['D']['id'], 'put', 'read', attr['access'])
+                self._edit_shock_acl(rj['data']['id'], 'put', 'read', attr['access'])
             else:
                 raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %e)
-        return rj['D']
+        return rj['data']
 
     def _edit_shock_acl(self, node, action, mode, emails):
         url = '%s/node/%s/acl' %(self.shock_url, node)
@@ -256,10 +256,10 @@ class ShockNotebookManager(NotebookManager):
             rj = result.json
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
-        if not (result.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['S','D','E']])):
+        if not (result.ok and rj and isinstance(rj, dict) and all([key in rj for key in ['status','data','error']])):
             raise web.HTTPError(500, u'Unable to PUT to Shock server %s: %s' %(url, result.raise_for_status()))
-        if rj['E']:
-            raise web.HTTPError(rj['S'], 'Shock error: '+rj['E'])
+        if rj['error']:
+            raise web.HTTPError(rj['status'], 'Shock error: '+rj['error'])
         return
 
     def log_info(self):
