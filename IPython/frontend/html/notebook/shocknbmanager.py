@@ -191,7 +191,7 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(504, u'Unable to connect to OAuth server %s: %s' %(url, rget.raise_for_status()))
         rj = rget.json
         if not (rj and isinstance(rj, dict)):
-            raise web.HTTPError(415, u'Return data not valid JSON format: %s' %e)
+            raise web.HTTPError(415, u'Return data not valid JSON format')
         return rj[key] if key and key in rj else rj
 
     def _get_shock_node(self, path, format):
@@ -206,7 +206,7 @@ class ShockNotebookManager(NotebookManager):
         if format == 'json':
             rj = rget.json
             if not (rj and isinstance(rj, dict) and all([key in rj for key in ['status','data','error']])):
-                raise web.HTTPError(415, u'Return data not valid Shock format: %s' %e)
+                raise web.HTTPError(415, u'Return data not valid Shock format')
             if rj['error']:
                 raise web.HTTPError(rj['status'], 'Shock error: '+rj['error'])
             return rj['data']
@@ -239,7 +239,7 @@ class ShockNotebookManager(NotebookManager):
             elif ('owner' in attr) and ('access' in attr) and attr['access']:
                 self._edit_shock_acl(rj['data']['id'], 'put', 'read', attr['access'])
             else:
-                raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %e)
+                raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %rj['error'])
         return rj['data']
 
     def _edit_shock_acl(self, node, action, mode, emails):
