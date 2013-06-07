@@ -37,33 +37,22 @@ from IPython.utils.traitlets import Unicode, Instance
 class ShockNotebookManager(NotebookManager):
 
     shock_url   = Unicode('', config=True, help='Shock server url')
-    oauth_url   = Unicode('', config=True, help='OAuth server url, for oauth mode')
-    shock_auth  = Unicode('', config=True, help="Shock authentication mode, must be 'basic' or 'oauth'")
-    user_name   = Unicode('', config=True, help='Shock user login name, for basic mode')
-    user_passwd = Unicode('', config=True, help='Shock user login password, for basic mode.')
-    user_token  = Unicode('', config=True, help='OAuth user bearer token, for oauth mode (OAuth v2.0).')
+    oauth_url   = Unicode('', config=True, help='OAuth server url')
+    user_token  = Unicode('', config=True, help='OAuth user bearer token (OAuth v2.0)')
     user_email  = None
     node_type   = 'ipynb'
     shock_map   = {}
-    get_auth    = {}
-    post_auth   = {}
+    auth_header = {}
 
     def __init__(self, **kwargs):
-        """verify Shock Auth mode and proper auth credintals for that mode, set auth GET/POST format"""
+        """verify Shock Authentication credintals, set auth header"""
         super(ShockNotebookManager, self).__init__(**kwargs)
         if not self.shock_url:
             raise web.HTTPError(412, u"Missing Shock server URI.")
-        if not (self.shock_auth == 'basic' or self.shock_auth == 'oauth'):
-            raise web.HTTPError(412, u"Invalid Shock Authentication mode (%s). Choose 'basic' or 'oauth'." %self.shock_auth)
-        if self.user_name and self.user_passwd and self.shock_auth == 'basic':
-            self.get_auth = {'auth': (self.user_name, self.user_passwd)}
-            self.post_auth = {'auth': (self.user_name, self.user_passwd)}
-        elif self.oauth_url and self.user_token and self.shock_auth == 'oauth':
-            self.get_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
-            self.post_auth = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
-            self.user_email = self._get_oauth(self.user_token, 'email')
-        else:
-            raise web.HTTPError(412, u"Missing credintals for Shock Authentication mode (%s)."%self.shock_auth)
+        if not (self.oauth_url and self.user_token):
+            raise web.HTTPError(412, u"Missing credintals for Shock Authentication.")
+        self.auth_header = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
+        self.user_email = self._get_oauth(self.user_token, 'email')
 
     def set_notebook_names(self):
         """load the notebook ids and names from Shock.
@@ -191,14 +180,13 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(504, u'Unable to connect to OAuth server %s: %s' %(url, rget.raise_for_status()))
         rj = rget.json
         if not (rj and isinstance(rj, dict)):
-            raise web.HTTPError(415, u'Return data not valid JSON format')
+            raise web.HTTPError(401, u'OAuth Authorization failed for %s.'%name)
         return rj[key] if key and key in rj else rj
 
     def _get_shock_node(self, path, format):
         url = self.shock_url+'/node'+path
-        content = None
         try:
-            rget = requests.get(url, **self.get_auth)
+            rget = requests.get(url, **self.auth_header)
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
         if not (rget.ok and rget.text):
@@ -220,7 +208,7 @@ class ShockNotebookManager(NotebookManager):
         files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
             kwargs = {'files': files, 'data': {'datatype': self.node_type}}
-            kwargs.update(self.post_auth)
+            kwargs.update(self.auth_header)
             rpost = requests.post(url, **kwargs)
             rj = rpost.json
         except Exception as e:
@@ -229,23 +217,21 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(500, u'Unable to POST to Shock server %s: %s' %(url, rpost.raise_for_status()))
         if rj['error']:
             raise web.HTTPError(rj['status'], 'Shock error: '+rj['error'])
-        # running in OAuth mode
-        if self.user_token and self.user_email and self.shock_auth == 'oauth':
-            attr = rj['data']['attributes']
-            # remove read ACLs for public notebook
-            if ('owner' in attr) and (attr['owner'] == 'public'):
-                self._edit_shock_acl(rj['data']['id'], 'delete', 'read', [self.user_email])
-            # add shared users to node read ACLs
-            elif ('owner' in attr) and ('access' in attr) and attr['access']:
-                self._edit_shock_acl(rj['data']['id'], 'put', 'read', attr['access'])
-            else:
-                raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %rj['error'])
+        attr = rj['data']['attributes']
+        # remove read ACLs for public notebook
+        if ('owner' in attr) and (attr['owner'] == 'public'):
+            self._edit_shock_acl(rj['data']['id'], 'delete', 'read', [self.user_email])
+        # add shared users to node read ACLs
+        elif ('owner' in attr) and ('access' in attr) and attr['access']:
+            self._edit_shock_acl(rj['data']['id'], 'put', 'read', attr['access'])
+        else:
+            raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %rj['error'])
         return rj['data']
 
     def _edit_shock_acl(self, node, action, mode, emails):
         url = '%s/node/%s/acl' %(self.shock_url, node)
         kwargs = {'params': { mode: ','.join(emails) }}
-        kwargs.update(self.post_auth)
+        kwargs.update(self.auth_header)
         try:
             if action == 'put':
                 result = requests.put(url, **kwargs)
