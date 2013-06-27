@@ -40,7 +40,7 @@ class ShockNotebookManager(NotebookManager):
     oauth_url   = Unicode('', config=True, help='OAuth server url')
     user_token  = Unicode('', config=True, help='OAuth user bearer token (OAuth v2.0)')
     user_email  = None
-    node_type   = 'ipynb'
+    node_format = 'ipynb'
     shock_map   = {}
     auth_header = {}
 
@@ -65,7 +65,7 @@ class ShockNotebookManager(NotebookManager):
         self.shock_map = {}
         nb_vers = defaultdict(list)
         
-        query_path = '?querynode&type='+self.node_type+'&limit=0'
+        query_path = '?query&format='+self.node_format+'&limit=0'
         query_result = self._get_shock_node(query_path, 'json')
         
         if query_result is not None:
@@ -141,6 +141,7 @@ class ShockNotebookManager(NotebookManager):
             if not hasattr(nb.metadata, 'description'):
                 nb.metadata.description = ''
             nb.metadata.created = datetime.datetime.utcnow().isoformat()
+            nb.metadata.format = self.node_format
             nb.metadata.nbid = notebook_id
         except Exception as e:
             raise web.HTTPError(400, u'Unexpected error setting notebook attributes: %s' %e)
@@ -207,7 +208,7 @@ class ShockNotebookManager(NotebookManager):
         attr_hdl = cStringIO.StringIO(attr)
         files = { "upload": ('%s.ipynb'%name, data_hdl), "attributes": ('%s_metadata.json'%name, attr_hdl) }
         try:
-            kwargs = {'files': files, 'data': {'datatype': self.node_type}}
+            kwargs = {'files': files}
             kwargs.update(self.auth_header)
             rpost = requests.post(url, **kwargs)
             rj = rpost.json
