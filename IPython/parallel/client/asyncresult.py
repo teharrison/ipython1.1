@@ -73,6 +73,9 @@ class AsyncResult(object):
         if isinstance(msg_ids, basestring):
             # always a list
             msg_ids = [msg_ids]
+            self._single_result = True
+        else:
+            self._single_result = False
         if tracker is None:
             # default to always done
             tracker = finished_tracker
@@ -81,14 +84,11 @@ class AsyncResult(object):
         self._fname=fname
         self._targets = targets
         self._tracker = tracker
+        
         self._ready = False
         self._outputs_ready = False
         self._success = None
         self._metadata = [ self._client.metadata.get(id) for id in self.msg_ids ]
-        if len(msg_ids) == 1:
-            self._single_result = not isinstance(targets, (list, tuple))
-        else:
-            self._single_result = False
 
     def __repr__(self):
         if self._ready:
@@ -191,14 +191,21 @@ class AsyncResult(object):
         """
 
         results = self.get(timeout)
+        if self._single_result:
+            results = [results]
         engine_ids = [ md['engine_id'] for md in self._metadata ]
-        bycount = sorted(engine_ids, key=lambda k: engine_ids.count(k))
-        maxcount = bycount.count(bycount[-1])
-        if maxcount > 1:
-            raise ValueError("Cannot build dict, %i jobs ran on engine #%i"%(
-                    maxcount, bycount[-1]))
+        
+        
+        rdict = {}
+        for engine_id, result in zip(engine_ids, results):
+            if engine_id in rdict:
+                raise ValueError("Cannot build dict, %i jobs ran on engine #%i" % (
+                    engine_ids.count(engine_id), engine_id)
+                )
+            else:
+                rdict[engine_id] = result
 
-        return dict(zip(engine_ids,results))
+        return rdict
 
     @property
     def result(self):
@@ -452,14 +459,14 @@ class AsyncResult(object):
             timeout = -1
         
         tic = time.time()
-        self._client._flush_iopub(self._client._iopub_socket)
-        self._outputs_ready = all(md['outputs_ready'] for md in self._metadata)
-        while not self._outputs_ready:
-            time.sleep(0.01)
+        while True:
             self._client._flush_iopub(self._client._iopub_socket)
-            self._outputs_ready = all(md['outputs_ready'] for md in self._metadata)
-            if timeout >= 0 and time.time() > tic + timeout:
+            self._outputs_ready = all(md['outputs_ready']
+                                      for md in self._metadata)
+            if self._outputs_ready or \
+               (timeout >= 0 and time.time() > tic + timeout):
                 break
+            time.sleep(0.01)
     
     @check_ready
     def display_outputs(self, groupby="type"):

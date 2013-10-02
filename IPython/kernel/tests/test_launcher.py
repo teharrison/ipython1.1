@@ -16,9 +16,6 @@ Authors
 # Imports
 #-----------------------------------------------------------------------------
 
-# Stdlib imports
-from unittest import TestCase
-
 # Third-party imports
 import nose.tools as nt
 
@@ -39,7 +36,7 @@ def test_swallow_argv():
         ([], ['-a', '5'], ['a'], None),
         ([], ['-a', '5'], ['a'], ['a']),
         ([], ['--foo'], None, ['foo']),
-        (['--foo'], ['--foo'], ['foobar'], []),
+        ([], ['--foo'], ['foobar'], []),
         ([], ['--foo', '5'], ['foo'], []),
         ([], ['--foo=5'], ['foo'], []),
         (['--foo=5'], ['--foo=5'], [], ['foo']),

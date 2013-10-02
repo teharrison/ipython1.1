@@ -48,7 +48,6 @@ Authors
 #-----------------------------------------------------------------------------
 
 # Stdlib imports
-import inspect
 import sys
 import tempfile
 import unittest
@@ -60,9 +59,9 @@ from IPython.external.decorator import decorator
 
 # We already have python3-compliant code for parametric tests
 if sys.version[0]=='2':
-    from _paramtestpy2 import parametric, ParametricTestCase
+    from _paramtestpy2 import parametric
 else:
-    from _paramtestpy3 import parametric, ParametricTestCase
+    from _paramtestpy3 import parametric
 
 # Expose the unittest-driven decorators
 from ipunittest import ipdoctest, ipdocstring
@@ -128,15 +127,17 @@ def make_label_dec(label,ds=None):
     --------
 
     A simple labeling decorator:
-    >>> slow = make_label_dec('slow')
-    >>> print slow.__doc__
-    Labels a test as 'slow'.
 
+    >>> slow = make_label_dec('slow')
+    >>> slow.__doc__
+    "Labels a test as 'slow'."
+    
     And one that uses multiple labels and a custom docstring:
+    
     >>> rare = make_label_dec(['slow','hard'],
     ... "Mix labels 'slow' and 'hard' for rare tests.")
-    >>> print rare.__doc__
-    Mix labels 'slow' and 'hard' for rare tests.
+    >>> rare.__doc__
+    "Mix labels 'slow' and 'hard' for rare tests."
 
     Now, let's test using this one:
     >>> @rare
@@ -352,7 +353,14 @@ def onlyif_cmds_exist(*commands):
     Decorator to skip test when at least one of `commands` is not found.
     """
     for cmd in commands:
-        if not is_cmd_found(cmd):
-            return skip("This test runs only if command '{0}' "
-                        "is installed".format(cmd))
+        try:
+            if not is_cmd_found(cmd):
+                return skip("This test runs only if command '{0}' "
+                            "is installed".format(cmd))
+        except ImportError as e:
+            # is_cmd_found uses pywin32 on windows, which might not be available
+            if sys.platform == 'win32' and 'pywin32' in e.message:
+                return skip("This test runs only if pywin32 and command '{0}' "
+                            "is installed".format(cmd))
+            raise e
     return null_deco

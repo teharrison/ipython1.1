@@ -57,7 +57,7 @@ from nose.core import TestProgram
 from IPython.utils import py3compat
 from IPython.utils.importstring import import_item
 from IPython.utils.path import get_ipython_module_path, get_ipython_package_dir
-from IPython.utils.process import find_cmd, pycmd2argv
+from IPython.utils.process import pycmd2argv
 from IPython.utils.sysinfo import sys_info
 from IPython.utils.tempdir import TemporaryDirectory
 from IPython.utils.warn import warn
@@ -166,6 +166,7 @@ have['jinja2'] = test_for('jinja2')
 have['wx'] = test_for('wx')
 have['wx.aui'] = test_for('wx.aui')
 have['azure'] = test_for('azure')
+have['sphinx'] = test_for('sphinx')
 
 min_zmq = (2,1,11)
 
@@ -230,8 +231,8 @@ def make_exclude():
                   # files for web serving.  Occasionally projects may put a .py
                   # file in there (MathJax ships a conf.py), so we might as
                   # well play it safe and skip the whole thing.
-                  ipjoin('frontend', 'html', 'notebook', 'static'),
-                  ipjoin('frontend', 'html', 'notebook', 'fabfile'),
+                  ipjoin('html', 'static'),
+                  ipjoin('html', 'fabfile'),
                   ]
     if not have['sqlite3']:
         exclusions.append(ipjoin('core', 'tests', 'test_history'))
@@ -252,6 +253,12 @@ def make_exclude():
     exclusions.append(ipjoin('lib', 'inputhookgtk'))
     exclusions.append(ipjoin('kernel', 'zmq', 'gui', 'gtkembed'))
 
+    #Also done unconditionally, exclude nbconvert directories containing
+    #config files used to test.  Executing the config files with iptest would
+    #cause an exception.
+    exclusions.append(ipjoin('nbconvert', 'tests', 'files'))
+    exclusions.append(ipjoin('nbconvert', 'exporters', 'tests', 'files'))
+
     # These have to be skipped on win32 because the use echo, rm, cd, etc.
     # See ticket https://github.com/ipython/ipython/issues/87
     if sys.platform == 'win32':
@@ -261,18 +268,19 @@ def make_exclude():
     if not have['pexpect']:
         exclusions.extend([ipjoin('lib', 'irunner'),
                            ipjoin('lib', 'tests', 'test_irunner'),
-                           ipjoin('frontend', 'terminal', 'console'),
+                           ipjoin('terminal', 'console'),
                            ])
 
     if not have['zmq']:
+        exclusions.append(ipjoin('lib', 'kernel'))
         exclusions.append(ipjoin('kernel'))
-        exclusions.append(ipjoin('frontend', 'qt'))
-        exclusions.append(ipjoin('frontend', 'html'))
-        exclusions.append(ipjoin('frontend', 'consoleapp.py'))
-        exclusions.append(ipjoin('frontend', 'terminal', 'console'))
+        exclusions.append(ipjoin('qt'))
+        exclusions.append(ipjoin('html'))
+        exclusions.append(ipjoin('consoleapp.py'))
+        exclusions.append(ipjoin('terminal', 'console'))
         exclusions.append(ipjoin('parallel'))
     elif not have['qt'] or not have['pygments']:
-        exclusions.append(ipjoin('frontend', 'qt'))
+        exclusions.append(ipjoin('qt'))
 
     if not have['pymongo']:
         exclusions.append(ipjoin('parallel', 'controller', 'mongodb'))
@@ -293,17 +301,20 @@ def make_exclude():
         exclusions.extend([ipjoin('extensions', 'tests', 'test_octavemagic')])
 
     if not have['tornado']:
-        exclusions.append(ipjoin('frontend', 'html'))
+        exclusions.append(ipjoin('html'))
 
     if not have['jinja2']:
-        exclusions.append(ipjoin('frontend', 'html', 'notebook', 'notebookapp'))
+        exclusions.append(ipjoin('html', 'notebookapp'))
 
     if not have['rpy2'] or not have['numpy']:
         exclusions.append(ipjoin('extensions', 'rmagic'))
         exclusions.append(ipjoin('extensions', 'tests', 'test_rmagic'))
 
     if not have['azure']:
-        exclusions.append(ipjoin('frontend', 'html', 'notebook', 'azurenbmanager'))
+        exclusions.append(ipjoin('html', 'services', 'notebooks', 'azurenbmanager'))
+
+    if not all((have['pygments'], have['jinja2'], have['sphinx'])):
+        exclusions.append(ipjoin('nbconvert'))
 
     # This is needed for the reg-exp to match on win32 in the ipdoctest plugin.
     if sys.platform == 'win32':
@@ -340,7 +351,7 @@ class IPTester(object):
         """Create new test runner."""
         p = os.path
         if runner == 'iptest':
-            iptest_app = get_ipython_module_path('IPython.testing.iptest')
+            iptest_app = os.path.abspath(get_ipython_module_path('IPython.testing.iptest'))
             self.runner = pycmd2argv(iptest_app) + sys.argv[1:]
         else:
             raise Exception('Not a valid test runner: %s' % repr(runner))
@@ -355,7 +366,7 @@ class IPTester(object):
         
         # Find the section we're testing (IPython.foo)
         for sect in self.params:
-            if sect.startswith('IPython'): break
+            if sect.startswith('IPython') or sect in special_test_suites: break
         else:
             raise ValueError("Section not found", self.params)
         
@@ -429,19 +440,33 @@ class IPTester(object):
                 # The process did not die...
                 print('... failed. Manual cleanup may be required.')
 
+
+special_test_suites = {
+    'autoreload': ['IPython.extensions.autoreload', 'IPython.extensions.tests.test_autoreload'],
+}
+                
 def make_runners(inc_slow=False):
     """Define the top-level packages that need to be tested.
     """
 
     # Packages to be tested via nose, that only depend on the stdlib
-    nose_pkg_names = ['config', 'core', 'extensions', 'frontend', 'lib',
-                      'testing', 'utils', 'nbformat' ]
+    nose_pkg_names = ['config', 'core', 'extensions', 'lib', 'terminal',
+                      'testing', 'utils', 'nbformat']
 
+    if have['qt']:
+        nose_pkg_names.append('qt')
+
+    if have['tornado']:
+        nose_pkg_names.append('html')
+        
     if have['zmq']:
         nose_pkg_names.append('kernel')
         nose_pkg_names.append('kernel.inprocess')
         if inc_slow:
             nose_pkg_names.append('parallel')
+
+    if all((have['pygments'], have['jinja2'], have['sphinx'])):
+        nose_pkg_names.append('nbconvert')
 
     # For debugging this code, only load quick stuff
     #nose_pkg_names = ['core', 'extensions']  # dbg
@@ -451,6 +476,9 @@ def make_runners(inc_slow=False):
 
     # Make runners
     runners = [ (v, IPTester('iptest', params=v)) for v in nose_packages ]
+    
+    for name in special_test_suites:
+        runners.append((name, IPTester('iptest', params=name)))
 
     return runners
 
@@ -468,6 +496,12 @@ def run_iptest():
 
     warnings.filterwarnings('ignore',
         'This will be removed soon.  Use IPython.testing.util instead')
+    
+    if sys.argv[1] in special_test_suites:
+        sys.argv[1:2] = special_test_suites[sys.argv[1]]
+        special_suite = True
+    else:
+        special_suite = False
 
     argv = sys.argv + [ '--detailed-errors',  # extra info in tracebacks
 
@@ -498,7 +532,8 @@ def run_iptest():
 
     # use our plugin for doctesting.  It will remove the standard doctest plugin
     # if it finds it enabled
-    plugins = [IPythonDoctest(make_exclude()), KnownFailure()]
+    ipdt = IPythonDoctest() if special_suite else IPythonDoctest(make_exclude())
+    plugins = [ipdt, KnownFailure()]
     
     # We need a global ipython running in this process, but the special
     # in-process group spawns its own IPython kernels, so for *that* group we
@@ -586,7 +621,7 @@ def run_iptestall(inc_slow=False):
 
 def main():
     for arg in sys.argv[1:]:
-        if arg.startswith('IPython'):
+        if arg.startswith('IPython') or arg in special_test_suites:
             # This is in-process
             run_iptest()
     else:

@@ -156,10 +156,10 @@ class TestView(ClusterTestCase, ParametricTestCase):
         ar = v.apply_async(wait, 1)
         # give the monitor time to notice the message
         time.sleep(.25)
-        ahr = v2.get_result(ar.msg_ids)
+        ahr = v2.get_result(ar.msg_ids[0])
         self.assertTrue(isinstance(ahr, AsyncHubResult))
         self.assertEqual(ahr.get(), ar.get())
-        ar2 = v2.get_result(ar.msg_ids)
+        ar2 = v2.get_result(ar.msg_ids[0])
         self.assertFalse(isinstance(ar2, AsyncHubResult))
         c.spin()
         c.close()
@@ -342,8 +342,20 @@ class TestView(ClusterTestCase, ParametricTestCase):
         arr = range(101)
         # ensure it will be an iterator, even in Python 3
         it = iter(arr)
-        r = view.map_sync(lambda x:x, arr)
+        r = view.map_sync(lambda x: x, it)
         self.assertEqual(r, list(arr))
+
+    @skip_without('numpy')
+    def test_map_numpy(self):
+        """test map on numpy arrays (direct)"""
+        import numpy
+        from numpy.testing.utils import assert_array_equal
+
+        view = self.client[:]
+        # 101 is prime, so it won't be evenly distributed
+        arr = numpy.arange(101)
+        r = view.map_sync(lambda x: x, arr)
+        assert_array_equal(r, arr)
     
     def test_scatter_gather_nonblocking(self):
         data = range(16)

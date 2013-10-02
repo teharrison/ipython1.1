@@ -57,8 +57,8 @@ from distutils.command.build_ext import build_ext
 from IPython.core import display
 from IPython.core import magic_arguments
 from IPython.core.magic import Magics, magics_class, cell_magic
-from IPython.testing.skipdoctest import skip_doctest
 from IPython.utils import py3compat
+from IPython.utils.path import get_ipython_cache_dir
 
 import Cython
 from Cython.Compiler.Errors import CompileError
@@ -192,7 +192,7 @@ class CythonMagics(Magics):
         """
         args = magic_arguments.parse_argstring(self.cython, line)
         code = cell if cell.endswith('\n') else cell+'\n'
-        lib_dir = os.path.join(self.shell.ipython_dir, 'cython')
+        lib_dir = os.path.join(get_ipython_cache_dir(), 'cython')
         quiet = True
         key = code, sys.version_info, sys.executable, Cython.__version__
 
@@ -278,7 +278,20 @@ class CythonMagics(Magics):
             self._so_ext = self._get_build_extension().get_ext_filename('')
             return self._so_ext
 
+    def _clear_distutils_mkpath_cache(self):
+        """clear distutils mkpath cache
+        
+        prevents distutils from skipping re-creation of dirs that have been removed
+        """
+        try:
+            from distutils.dir_util import _path_created
+        except ImportError:
+            pass
+        else:
+            _path_created.clear()
+    
     def _get_build_extension(self):
+        self._clear_distutils_mkpath_cache()
         dist = Distribution()
         config_files = dist.find_config_files()
         try:
