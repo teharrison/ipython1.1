@@ -175,7 +175,7 @@ class ShockNotebookManager(NotebookManager):
             k, v = part.split('=')
             if k and v:
                 token_dict[k] = v
-        for item in ['un', 'tokenid', 'expiry', 'client_id', 'token_type', 'sig']:
+        for item in ['un', 'SigningSubject']:
             if item not in token_dict:
                 raise web.HTTPError(403, u'Invalid OAuth token structure: %s' %token)
         return token_dict
