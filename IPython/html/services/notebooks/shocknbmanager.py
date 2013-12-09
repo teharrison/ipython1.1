@@ -37,10 +37,9 @@ from IPython.utils.traitlets import Unicode, Instance
 class ShockNotebookManager(NotebookManager):
 
     shock_url   = Unicode('', config=True, help='Shock server url')
-    oauth_url   = Unicode('', config=True, help='OAuth server url')
     user_token  = Unicode('', config=True, help='OAuth user bearer token (OAuth v2.0)')
-    user_email  = None
     node_format = 'ipynb'
+    user_name   = None
     shock_map   = {}
     auth_header = {}
 
@@ -49,10 +48,10 @@ class ShockNotebookManager(NotebookManager):
         super(ShockNotebookManager, self).__init__(**kwargs)
         if not self.shock_url:
             raise web.HTTPError(412, u"Missing Shock server URI.")
-        if not (self.oauth_url and self.user_token):
+        if not self.user_token:
             raise web.HTTPError(412, u"Missing credintals for Shock Authentication.")
         self.auth_header = {'headers': {'Authorization': 'OAuth %s'%self.user_token}}
-        self.user_email = self._get_oauth(self.user_token, 'email')
+        self.user_name = self._parse_token(self.user_token)['un']
 
     def set_notebook_names(self):
         """load the notebook ids and names from Shock.
@@ -170,19 +169,16 @@ class ShockNotebookManager(NotebookManager):
         self.write_notebook_object(nb, notebook_id)
         self.delete_notebook_id(notebook_id)
 
-    def _get_oauth(self, token, key=None):
-        name = token.split('|')[0].split('=')[1]
-        url  = self.oauth_url+"/"+name
-        try:
-            rget = requests.get(url, headers={'Authorization': 'Globus-Goauthtoken %s'%token})
-        except Exception as e:
-            raise web.HTTPError(504, u'Unable to connect to OAuth server %s: %s' %(url, e))
-        if not (rget.ok and rget.text):
-            raise web.HTTPError(504, u'Unable to connect to OAuth server %s: %s' %(url, rget.raise_for_status()))
-        rj = rget.json
-        if not (rj and isinstance(rj, dict)):
-            raise web.HTTPError(401, u'OAuth Authorization failed for %s.'%name)
-        return rj[key] if key and key in rj else rj
+    def _parse_token(self, token):
+        token_dict = {}
+        for part in token.strip().split('|'):
+            k, v = part.split('=')
+            if k and v:
+                token_dict[k] = v
+        for item in ['un', 'tokenid', 'expiry', 'client_id', 'token_type', 'sig']:
+            if item not in token_dict:
+                raise web.HTTPError(403, u'Invalid OAuth token structure: %s' %token)
+        return token_dict
 
     def _get_shock_node(self, path, format):
         url = self.shock_url+'/node'+path
@@ -221,7 +217,7 @@ class ShockNotebookManager(NotebookManager):
         attr = rj['data']['attributes']
         # remove read ACLs for public notebook
         if ('owner' in attr) and (attr['owner'] == 'public'):
-            self._edit_shock_acl(rj['data']['id'], 'delete', 'read', [self.user_email])
+            self._edit_shock_acl(rj['data']['id'], 'delete', 'read', [self.user_name])
         # add shared users to node read ACLs
         elif ('owner' in attr) and ('access' in attr) and attr['access']:
             self._edit_shock_acl(rj['data']['id'], 'put', 'read', attr['access'])
@@ -229,17 +225,17 @@ class ShockNotebookManager(NotebookManager):
             raise web.HTTPError(415, u'POST data not valid Shock OAuth format: %s' %rj['error'])
         return rj['data']
 
-    def _edit_shock_acl(self, node, action, mode, emails):
-        url = '%s/node/%s/acl' %(self.shock_url, node)
-        kwargs = {'params': { mode: ','.join(emails) }}
+    def _edit_shock_acl(self, node, method, mode, names):
+        url = '%s/node/%s/acl/%s' %(self.shock_url, node, mode)
+        kwargs = {'params': { 'users': ','.join(names) }}
         kwargs.update(self.auth_header)
         try:
-            if action == 'put':
+            if method == 'put':
                 result = requests.put(url, **kwargs)
-            elif action == 'delete':
+            elif method == 'delete':
                 result = requests.delete(url, **kwargs)
             else:
-                raise web.HTTPError(500, u'Invalid Shock ACL action: %s' %action)
+                raise web.HTTPError(500, u'Invalid Shock ACL method: %s' %method)
             rj = result.json
         except Exception as e:
             raise web.HTTPError(504, u'Unable to connect to Shock server %s: %s' %(url, e))
